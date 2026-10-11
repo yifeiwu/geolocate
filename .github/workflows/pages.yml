@@ -8,7 +8,7 @@ on:
   schedule:
     # Geoscape publishes quarterly (Feb / May / Aug / Nov). Rebuild a few days
     # after each release so the site picks up boundary and postcode changes.
-    - cron: '17 4 20 2,5,8,11'
+    - cron: '17 4 20 2,5,8,11 *'
   workflow_dispatch:
     inputs:
       max_hops:
