@@ -3,7 +3,7 @@
 neighbours.js cannot run under Python, so this re-implements its algorithm
 line-for-line (including the half-up rounding and the
 sqrt(dx*dx + dy*dy) distance) and asserts it yields byte-identical results to
-the emitted api/n/*.json files. If this drifts, the documented client contract
+the emitted api/*.json files. If this drifts, the documented client contract
 in the README is wrong.
 
 getSuburb()'s slug resolution is mirrored the same way, since a handful of
@@ -157,7 +157,7 @@ def main(argv=None) -> int:
 
     site = Path(args.site)
     adj, subs = _load(site)
-    api = site / "api" / "n"
+    api = site / "api"
 
     mismatches = []
     filter_mismatches = []

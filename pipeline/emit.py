@@ -113,7 +113,7 @@ def emit_all(
     out_dir: Path | None = None,
 ) -> dict:
     out_dir = Path(out_dir or config.SITE_DIR)
-    api_dir = out_dir / "api" / "n"
+    api_dir = out_dir / "api"
     data_dir = out_dir / "data"
 
     meta = build_slugs(meta)

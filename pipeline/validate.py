@@ -78,7 +78,7 @@ def validate_known(meta: pd.DataFrame, neighbours: dict) -> list[str]:
 
 def validate_output(site_dir: Path, expected: int) -> list[str]:
     warnings = []
-    api = site_dir / "api" / "n"
+    api = site_dir / "api"
     files = sorted(api.glob("*.json"))
     if len(files) != expected:
         raise AssertionError(f"expected {expected} suburb files, found {len(files)}")

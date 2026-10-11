@@ -61,7 +61,7 @@
 
   /** Fetch one locality's full record by its exact slug. */
   function getSuburbBySlug(slug) {
-    return json(BASE + '/api/n/' + slug + '.json');
+    return json(BASE + '/api/' + slug + '.json');
   }
 
   function notFound(suburb, postcode) {
@@ -207,7 +207,7 @@
       frontier = next;
       if (!next.length) break;
     }
-    // Same ordering as the precomputed api/n files: hops, then km, then name.
+    // Same ordering as the precomputed api/ files: hops, then km, then name.
     result.sort(function (a, b) {
       return a.hops - b.hops || a.km - b.km ||
         String(a.suburb || '').localeCompare(String(b.suburb || ''));

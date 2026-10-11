@@ -32,7 +32,7 @@ def check(site: pathlib.Path = SITE) -> tuple[list[str], dict]:
 
     for m in re.finditer(r"BASE \+ '([^']+)'", lib):
         p = m.group(1)
-        # /api/n/<slug>.json and /api/index/<letter>.json are parameterised
+        # /api/<slug>.json and /api/index/<letter>.json are parameterised
         if "<" in p or ".json" not in p:
             continue
         if not (site / p.lstrip("/")).exists():
@@ -52,12 +52,13 @@ def check(site: pathlib.Path = SITE) -> tuple[list[str], dict]:
     # 5. sample slugs resolve, and the documented example is real
     subs = json.loads((site / "data" / "suburbs.json").read_text(encoding="utf-8"))
     slugs = {v["slug"] for v in subs.values()}
-    for doc_slug in re.findall(r"/api/n/([a-z0-9-]+)\.json", html):
+    for doc_slug in re.findall(r"/api/([a-z0-9-]+)\.json", html):
         if doc_slug not in slugs:
             problems.append(f"documented example slug does not exist: {doc_slug}")
 
-    # 6. every suburbs.json entry has a file on disk
-    api = site / "api" / "n"
+    # 6. every suburbs.json entry has a file on disk. glob() is
+    #    non-recursive, so the api/index/ shards are not swept in here.
+    api = site / "api"
     files = {p.stem for p in api.glob("*.json")}
     if files != slugs:
         problems.append(

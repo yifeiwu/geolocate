@@ -25,7 +25,7 @@ This API is built on boundary adjacency instead.
 ## Quick start
 
 ```bash
-curl https://<user>.github.io/geolocate/api/n/parramatta-2150.json
+curl https://<user>.github.io/geolocate/api/parramatta-2150.json
 ```
 
 ```json
@@ -55,8 +55,8 @@ list yourself on `hops` or on `km`.
 
 | Endpoint | Description |
 |---|---|
-| `GET /api/n/<name>-<postcode>.json` | The full precomputed neighbourhood, hops 1–3 |
-| `GET /api/n/<name>-<postcode>-<state>.json` | Same, for the 5 cross-border localities (see below) |
+| `GET /api/<name>-<postcode>.json` | The full precomputed neighbourhood, hops 1–3 |
+| `GET /api/<name>-<postcode>-<state>.json` | Same, for the 5 cross-border localities (see below) |
 | `GET /api/index/<letter>.json` | Search index sharded by first letter |
 | `GET /data/suburbs.json` | Dictionary: `id → name, state, postcodes, centroid, cx, cy` |
 | `GET /data/graph.json` | Raw adjacency: `id → [neighbour_id, km, shared_boundary_km]` |
@@ -231,7 +231,7 @@ python -m pipeline.verify_site                 # site links/assets vs emitted da
 ```
 
 `verify_client` re-implements the client `bfs()` in Python and asserts it reproduces every precomputed
-`api/n/*.json` byte-for-byte across all 15,648 localities — so the documented client contract cannot silently
+`api/*.json` byte-for-byte across all 15,648 localities — so the documented client contract cannot silently
 drift from the data. (It shares the exact distance expression and rounding rule, which is why
 `suburbs.json` publishes full-precision projected coordinates.)
 
