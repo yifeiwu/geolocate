@@ -13,7 +13,7 @@
       $('stats').textContent =
         m.locality_count.toLocaleString() + ' localities  ·  ' +
         m.edge_count.toLocaleString() + ' connections  ·  ' +
-        'max distance ' + m.max_distance + '  ·  ' +
+        'precomputed to ' + m.max_distance + ' hops  ·  ' +
         'postcodes: ' + pc + '  ·  built ' + (m.generated_at || '').slice(0, 10);
       $('attribution').textContent = m.attribution.suburbs + '. ' + m.attribution.postcodes + '.';
       if (m.centroid_fallback_count != null) {
@@ -22,9 +22,6 @@
       if (m.isolated_count != null) {
         $('isolatedcount').textContent = m.isolated_count.toLocaleString();
       }
-      document.querySelectorAll('#distance option').forEach(function (o) {
-        if (Number(o.value) > m.max_distance) o.disabled = true;
-      });
     })
     .catch(function () {
       $('stats').textContent = 'metadata unavailable';
@@ -76,42 +73,57 @@
 
     var suburb = $('suburb').value.trim();
     var postcode = $('postcode').value.trim();
-    var distance = Number($('distance').value);
+    var state = $('state').value.trim();
+    var within = $('within').value.trim();
 
-    api.query(suburb, postcode, distance).then(function (r) {
+    api.query(suburb, postcode, state || undefined).then(function (r) {
+      var all = r.neighbours;
+      var shown = within === '' ? all : all.filter(function (n) { return n.km <= Number(within); });
+
       $('result').hidden = false;
       $('result-title').textContent = r.suburb + ' ' + (r.postcode || '');
       $('result-sub').textContent =
         r.state + '  ·  centroid ' + r.centroid.lat.toFixed(4) + ', ' + r.centroid.lon.toFixed(4) +
-        ' (' + r.centroid.kind + ')  ·  within ' + distance + ' hop' + (distance > 1 ? 's' : '');
+        ' (' + r.centroid.kind + ')';
 
-      var counts = {};
-      r.neighbours.forEach(function (n) { counts[n.hops] = (counts[n.hops] || 0) + 1; });
-      var pills = Object.keys(counts).sort().map(function (h) {
-        return '<span class="pill">distance ' + h + ': ' + counts[h] + '</span>';
-      }).join('');
-      $('result-stats').innerHTML = pills +
-        (r.truncated ? '<span class="pill warn">truncated</span>' : '');
+      var pills = '<span class="pill">' + shown.length +
+        (within === '' ? ' neighbours' : ' within ' + within + ' km') + '</span>';
+      if (within !== '' && shown.length !== all.length) {
+        pills += '<span class="pill">' + (all.length - shown.length) + ' beyond</span>';
+      }
+      if (r.truncated) pills += '<span class="pill warn">truncated</span>';
+      $('result-stats').innerHTML = pills;
 
       var body = $('result-table').querySelector('tbody');
-      if (!r.neighbours.length) {
-        body.innerHTML = '<tr><td colspan="5" class="muted">No connected suburbs found. ' +
-          'This locality may be isolated (an island or remote area).</td></tr>';
+      if (!shown.length) {
+        body.innerHTML = '<tr><td colspan="4" class="muted">' +
+          (all.length ? 'No neighbours within ' + within + ' km.' :
+           'No connected suburbs found. This locality may be isolated (an island or remote area).') +
+          '</td></tr>';
         return;
       }
-      body.innerHTML = r.neighbours.map(function (n) {
+      body.innerHTML = shown.map(function (n) {
         return '<tr>' +
           '<td>' + esc(n.suburb) + '</td>' +
           '<td>' + esc(n.postcode || '—') + '</td>' +
           '<td>' + esc(n.state) + '</td>' +
-          '<td class="num">' + n.hops + '</td>' +
           '<td class="num">' + n.km.toFixed(1) + '</td>' +
           '</tr>';
       }).join('');
     }).catch(function (err) {
+      if (err.code === 'AMBIGUOUS_SUBURB') {
+        fail('"' + suburb + ' ' + postcode + '" exists in more than one state (' +
+          (err.slugs || []).join(' and ') + '). Enter the state to pick one.');
+        return;
+      }
+      if (err.code === 'NOT_FOUND') {
+        fail('No suburb found matching "' + suburb + ' ' + postcode +
+          '". Both suburb and postcode must match exactly.');
+        return;
+      }
       fail(/HTTP 404/.test(err.message)
         ? 'No suburb found matching "' + suburb + ' ' + postcode +
-          '". Check the spelling, and note that both suburb and postcode must match exactly."
+          '". Check the spelling, and note that both suburb and postcode must match exactly.'
         : err.message);
     });
   });

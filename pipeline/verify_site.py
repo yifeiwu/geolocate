@@ -44,8 +44,8 @@ def check(site: pathlib.Path = SITE) -> tuple[list[str], dict]:
         if m.group(1) not in ids:
             problems.append(f"app.js targets missing element id: #{m.group(1)}")
 
-    # 4. the id the client library needs must be present too
-    for needed in ("suburb", "postcode", "distance", "form", "suggestions"):
+    # 4. the ids the client library and demo need must be present too
+    for needed in ("suburb", "postcode", "within", "state", "form", "suggestions", "states"):
         if needed not in ids:
             problems.append(f"index.html missing required id: #{needed}")
 
@@ -85,6 +85,15 @@ def check(site: pathlib.Path = SITE) -> tuple[list[str], dict]:
         problems.append(
             "neighbours.js does not strip the trailing slash from BASE "
             "(would produce double-slash URLs)"
+        )
+
+    # 9. bfs() must measure against the dictionary it was handed. Reading the
+    #    loadGraph() cache instead makes any caller that passes its own meta
+    #    fall back to per-edge distances, i.e. the distance to the previous hop.
+    if not re.search(r"distanceFrom\(\s*start\s*,\s*nid\s*,\s*metaMap\s*\)", lib):
+        problems.append(
+            "neighbours.js bfs() does not pass its meta to distanceFrom(); "
+            "distances would fall back to per-edge values (wrong for deep hops)"
         )
 
     stats = {

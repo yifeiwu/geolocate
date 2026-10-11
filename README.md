@@ -1,11 +1,15 @@
 # Australian Suburb Neighbourhood API
 
-Given a **suburb**, **postcode** and **distance**, returns every Australian suburb within *N* hops of
-connectivity — where distance counts **shared boundaries**, not kilometres.
+Given a **suburb** and **postcode**, returns every Australian suburb within *N* hops of connectivity —
+where connectivity counts **shared boundaries**, not kilometres. Each neighbour reports both its hop count
+and its straight-line distance, so you can filter on either.
 
-- Distance 1 = the suburb shares a boundary with the input suburb
-- Distance 2 = reachable via one intermediate suburb
-- Distance 3 = reachable via two intermediate suburbs
+- Hop 1 = the suburb shares a boundary with the input suburb
+- Hop 2 = reachable via one intermediate suburb
+- Hop 3 = reachable via two intermediate suburbs
+
+There is no hop argument: every locality file holds the same fixed neighbourhood (depth 3 by default), so
+the filtering is yours to do.
 
 Covers **15,648 localities** across all eight states and territories plus external territories, built from
 official gazetted boundaries.
@@ -44,13 +48,15 @@ curl https://<user>.github.io/geolocate/api/n/parramatta-2150.json
 ```
 
 Each file is self-contained — every neighbour carries its own name, postcode, state, hop count and
-centroid distance. Filter on `hops` for your requested `distance`.
+centroid distance. There is no hop parameter: every file holds the same fixed neighbourhood, so filter the
+list yourself on `hops` or on `km`.
 
 ### Endpoints
 
 | Endpoint | Description |
 |---|---|
-| `GET /api/n/<name>-<postcode>.json` | Neighbours at each hop, 1–3 |
+| `GET /api/n/<name>-<postcode>.json` | The full precomputed neighbourhood, hops 1–3 |
+| `GET /api/n/<name>-<postcode>-<state>.json` | Same, for the 5 cross-border localities (see below) |
 | `GET /api/index/<letter>.json` | Search index sharded by first letter |
 | `GET /data/suburbs.json` | Dictionary: `id → name, state, postcodes, centroid, cx, cy` |
 | `GET /data/graph.json` | Raw adjacency: `id → [neighbour_id, km, shared_boundary_km]` |
@@ -64,11 +70,43 @@ centroid distance. Filter on `hops` for your requested `distance`.
 <script src="assets/neighbours.js"></script>
 <script>
   const api = createClient();
-  const r = await api.query('Parramatta', '2150', 2);   // hops <= 2
+  const r = await api.query('Parramatta', '2150');
   console.log(r.neighbours);
+
+  // every record carries both hops and km, so filter client-side
+  const near = r.neighbours.filter(n => n.km <= 5);
+  const direct = r.neighbours.filter(n => n.hops === 1);
+
   console.log(await api.search('parra', 10));
 </script>
 ```
+
+### Cross-border localities
+
+Five localities share **both** a name and a postcode across a state border, so that pair is not unique and
+their slugs carry a state suffix:
+
+| Name | Postcode | States |
+|---|---|---|
+| Cottonvale | 4375 | NSW, QLD |
+| Jervis Bay | 2540 | NSW, OT |
+| Mingoola | 4380 | NSW, QLD |
+| Mungindi | 2406 | NSW, QLD |
+| Texas | 4385 | NSW, QLD |
+
+Pass the state as the third argument, or fetch by slug:
+
+```js
+await api.query('Texas', '4385', 'QLD');   // texas-4385-qld
+await api.getSuburbBySlug('texas-4385-nsw');
+
+await api.query('Texas', '4385');
+// throws err.code === 'AMBIGUOUS_SUBURB'
+// err.slugs === ['texas-4385-nsw', 'texas-4385-qld']
+```
+
+`getSuburb()` tries the plain `<name>-<postcode>` slug first and only falls back to the search index when
+that 404s, so ordinary lookups still cost exactly one request.
 
 ### Arbitrary hop counts
 
@@ -80,6 +118,10 @@ const { graph, suburbs } = await api.loadGraph();
 const id = Object.keys(suburbs).find(k => suburbs[k].slug === 'parramatta-2150');
 api.bfs(graph, id, 6, suburbs);   // any depth
 ```
+
+The dictionary must be the full one from `data/suburbs.json` — `bfs()` needs its `cx`/`cy` to measure
+centroid-to-centroid distance. Without them it falls back to the per-edge distance, which is the distance to
+the *previous* hop and is badly wrong past hop 1 (off by up to ~350 km on rural chains).
 
 ---
 
@@ -98,7 +140,7 @@ Current build: **43,373 connections**, mean degree 5.54, **1,047 corner-only con
 
 ## Behaviour worth knowing
 
-**Corner contact is not adjacency.** Four suburbs meeting at one point are all distance 2, never 1.
+**Corner contact is not adjacency.** Four suburbs meeting at a single point are all 2 hops apart, never 1.
 
 **River-separated suburbs are not adjacent.** Geoscape models waterways as gaps, so the Melbourne CBD and
 Fitzroy sit ~144 m apart across the Yarra and are *not* connected. Fitzroy borders Carlton, East Melbourne and
@@ -168,7 +210,8 @@ site/                the published static site
 ### Why GitHub Pages can host an API
 
 GitHub Pages is static-only, so the graph is **precomputed at build time** and served as JSON. Each suburb is
-one file; `distance` is a client-side filter on the `hops` field. A GitHub Actions workflow rebuilds quarterly
+one file holding its whole neighbourhood; narrowing to fewer hops or a kilometre radius is a client-side
+filter on the `hops` and `km` fields. A GitHub Actions workflow rebuilds quarterly
 (after each Geoscape release) and on manual dispatch, and fails the build if the site exceeds the 1 GB cap.
 
 The source cache is keyed on an **upstream-release fingerprint** (`pipeline/cache_key.py` hashes Geoscape's
@@ -191,6 +234,12 @@ python -m pipeline.verify_site                 # site links/assets vs emitted da
 `api/n/*.json` byte-for-byte across all 15,648 localities — so the documented client contract cannot silently
 drift from the data. (It shares the exact distance expression and rounding rule, which is why
 `suburbs.json` publishes full-precision projected coordinates.)
+
+It also mirrors `getSuburb()`'s slug resolution and asserts every postcoded locality is reachable, that each
+one resolves to its *own* slug, and that exactly the 5 cross-border pairs raise as ambiguous without a state.
+
+> There is no JS runtime in the build environment, so `neighbours.js` is verified this way rather than by
+> executing it. Both mirrors are line-for-line transcriptions; if you change the client, change them too.
 
 `verify_site` checks that every asset, `fetch()` path and element ID the HTML and JS reference actually exists,
 that the documented example slugs are real, and that the 15,648 emitted files and 26 index shards cover every

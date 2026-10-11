@@ -87,14 +87,27 @@ def validate_output(site_dir: Path, expected: int) -> list[str]:
         if not (site_dir / required).exists():
             raise AssertionError(f"missing artefact: {required}")
 
-    sample = files[len(files) // 2]
-    payload = json.loads(sample.read_text(encoding="utf-8"))
-    for key in ("suburb", "postcode", "state", "centroid", "neighbours", "max_distance"):
-        if key not in payload:
-            raise AssertionError(f"{sample.name} missing key '{key}'")
-    for entry in payload["neighbours"][:50]:
-        for key in ("suburb", "postcode", "state", "hops", "km"):
-            if key not in entry:
-                raise AssertionError(f"{sample.name} neighbour missing key '{key}'")
-    log.info("schema check ok on %s (%d neighbours)", sample.name, len(payload["neighbours"]))
+    top_keys = ("suburb", "postcode", "state", "centroid", "neighbours",
+                "isolated", "truncated", "max_distance")
+    nbr_keys = ("suburb", "postcode", "state", "hops", "km")
+    # spot the schema across several files, not just one, so a change that only
+    # affects part of the output cannot slip through.
+    for sample in (files[i] for i in range(0, len(files), max(1, len(files) // 5))):
+        payload = json.loads(sample.read_text(encoding="utf-8"))
+        for key in top_keys:
+            if key not in payload:
+                raise AssertionError(f"{sample.name} missing key '{key}'")
+        hops = []
+        for entry in payload["neighbours"]:
+            for key in nbr_keys:
+                if key not in entry:
+                    raise AssertionError(f"{sample.name} neighbour missing key '{key}'")
+            if not 1 <= entry["hops"] <= payload["max_distance"]:
+                raise AssertionError(
+                    f"{sample.name} neighbour hops {entry['hops']} out of range"
+                )
+            hops.append((entry["hops"], entry["km"]))
+        if hops != sorted(hops):
+            raise AssertionError(f"{sample.name} neighbours are not sorted by hops then km")
+    log.info("schema check ok (%d neighbours in %s)", len(payload["neighbours"]), sample.name)
     return warnings

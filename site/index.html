@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Australian Suburb Neighbourhood API</title>
-<meta name="description" content="Connectivity-based neighbouring suburbs for Australia. Given a suburb, postcode and distance, returns every suburb within N hops of shared boundary.">
+<meta name="description" content="Connectivity-based neighbouring suburbs for Australia. Given a suburb and postcode, returns every suburb within 3 hops of shared boundary, each with its hop count and centroid distance.">
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
@@ -12,9 +12,10 @@
 <header class="wrap">
   <h1>Australian Suburb Neighbourhood API</h1>
   <p class="lede">
-    Given a <strong>suburb</strong>, <strong>postcode</strong> and <strong>distance</strong>, returns every
-    Australian suburb within <em>N</em> hops of connectivity &mdash; where distance is measured by how many
-    shared boundaries separate two suburbs, not by kilometres.
+    Given a <strong>suburb</strong> and <strong>postcode</strong>, returns every Australian suburb within
+    <em>N</em> hops of connectivity &mdash; where distance is measured by how many shared boundaries separate
+    two suburbs, not by kilometres. Every neighbour carries both its hop count and its straight-line distance,
+    so you can filter either way.
   </p>
   <p class="stats" id="stats">loading dataset metadata&hellip;</p>
 </header>
@@ -34,15 +35,26 @@
         <input id="postcode" placeholder="2150" required>
       </div>
       <div class="field small">
-        <label for="distance">Distance (hops)</label>
-        <select id="distance">
-          <option value="1">1 &mdash; directly connected</option>
-          <option value="2">2</option>
-          <option value="3" selected>3</option>
-        </select>
+        <label for="within">Within (km)</label>
+        <input id="within" type="number" min="0" step="1" placeholder="any">
+      </div>
+      <div class="field small">
+        <label for="state">State <span class="muted">(if ambiguous)</span></label>
+        <input id="state" list="states" placeholder="NSW" maxlength="3">
+        <datalist id="states">
+          <option value="NSW"><option value="VIC"><option value="QLD">
+          <option value="WA"><option value="SA"><option value="TAS">
+          <option value="ACT"><option value="NT"><option value="OT">
+        </datalist>
       </div>
       <button type="submit">Search</button>
     </form>
+    <p class="hint">
+      Each locality ships one fixed neighbourhood, listed nearest first. The distance box filters the result
+      by kilometres &mdash; it is applied in your browser, not on the server. Five names sit on a state border
+      and share a postcode across it &mdash; Cottonvale 4375, Jervis Bay 2540, Mingoola 4380, Mungindi 2406
+      and Texas 4385 &mdash; and those need the state field.
+    </p>
     <p class="error" id="error" hidden></p>
   </section>
 
@@ -52,7 +64,7 @@
     <div id="result-stats" class="pillrow"></div>
     <table id="result-table">
       <thead>
-        <tr><th>Suburb</th><th>Postcode</th><th>State</th><th class="num">Distance</th><th class="num">Centroid km</th></tr>
+        <tr><th>Suburb</th><th>Postcode</th><th>State</th><th class="num">Centroid km</th></tr>
       </thead>
       <tbody></tbody>
     </table>
@@ -62,17 +74,17 @@
     <h2>How distance works</h2>
     <p>
       Suburb boundaries come from <strong>Geoscape Administrative Boundaries</strong>, the official gazetted
-      locality boundaries. Two suburbs are <strong>directly connected</strong> (distance&nbsp;1) when their
+      locality boundaries. Two suburbs are <strong>directly connected</strong> (1&nbsp;hop) when their
       polygons share a boundary line of at least 1&nbsp;metre.
     </p>
     <ul>
-      <li><strong>Distance 1</strong> &mdash; the polygons share a boundary.</li>
-      <li><strong>Distance 2</strong> &mdash; reachable via one intermediate suburb.</li>
-      <li><strong>Distance 3</strong> &mdash; reachable via two intermediate suburbs.</li>
+      <li><strong>1 hop</strong> &mdash; the polygons share a boundary.</li>
+      <li><strong>2 hops</strong> &mdash; reachable via one intermediate suburb.</li>
+      <li><strong>3 hops</strong> &mdash; reachable via two intermediate suburbs.</li>
     </ul>
     <p class="callout">
-      <strong>Corner contact does not count.</strong> Four suburbs meeting at a single point are all at
-      distance 2, never distance 1. In the current build, 1,047 corner-only contacts were rejected this way.
+      <strong>Corner contact does not count.</strong> Four suburbs meeting at a single point are all 2 hops
+      apart, never 1. In the current build, 1,047 corner-only contacts were rejected this way.
     </p>
     <p class="callout warn">
       <strong>River-separated suburbs are not adjacent.</strong> Geoscape models waterways as gaps between
@@ -90,7 +102,7 @@
     <h2>Endpoints</h2>
 
     <h3>Neighbours for one suburb</h3>
-    <p>One file per locality, named <code>&lt;slugified-name&gt;-&lt;postcode&gt;</code>. Fully self-contained &mdash; every neighbour carries its own name, postcode, state, hop count and distance.</p>
+    <p>One file per locality, named <code>&lt;slugified-name&gt;-&lt;postcode&gt;</code>. Fully self-contained &mdash; every neighbour carries its own name, postcode, state, hop count and distance. There is no hop parameter: the file always holds the same fixed neighbourhood, and <code>hops</code> and <code>km</code> are there so you can filter it however you like.</p>
     <pre><code>GET /api/n/parramatta-2150.json</code></pre>
     <pre><code>{
   "suburb": "Parramatta",
@@ -135,10 +147,17 @@ GET /data/graph.json     <span class="c"># raw adjacency: id -&gt; [neighbour_id
     <pre><code>&lt;script src="assets/neighbours.js"&gt;&lt;/script&gt;
 &lt;script&gt;
   const api = createClient();
-  const r = await api.query('Parramatta', '2150', 2);
-  console.log(r.neighbours);          // filtered to hops &lt;= 2
+  const r = await api.query('Parramatta', '2150');
+  console.log(r.neighbours);          // every neighbour the build precomputed
   console.log(await api.search('parra', 10));
 &lt;/script&gt;</code></pre>
+    <p>
+      Each file holds one fixed neighbourhood, so there is no hop argument &mdash; every record carries both
+      <code>hops</code> and <code>km</code>, so filter the list yourself:
+    </p>
+    <pre><code>const withinKm = 5;
+const near = r.neighbours.filter(n =&gt; n.km &lt;= withinKm);
+const direct = r.neighbours.filter(n =&gt; n.hops === 1);</code></pre>
     <p>
       For hop counts beyond the precomputed maximum, load the raw graph and expand client-side &mdash; it is a
       few hundred KB and a breadth-first search takes milliseconds:
@@ -146,6 +165,26 @@ GET /data/graph.json     <span class="c"># raw adjacency: id -&gt; [neighbour_id
     <pre><code>const { graph, suburbs } = await api.loadGraph();
 const id = Object.keys(suburbs).find(k =&gt; suburbs[k].slug === 'parramatta-2150');
 api.bfs(graph, id, 6, suburbs);   // any depth</code></pre>
+    <p>
+      Pass the full dictionary from <code>data/suburbs.json</code>. <code>bfs()</code> measures
+      centroid-to-centroid from its <code>cx</code>/<code>cy</code>; without them it falls back to the
+      per-edge distance, which is the distance to the <em>previous</em> hop and is badly wrong past hop 1.
+    </p>
+    <h3>Cross-border localities</h3>
+    <p>
+      Five localities share both a name and a postcode across a state border, so name+postcode alone is not
+      unique. Their slugs carry a state suffix. Pass the state as the third argument, or fetch by slug:
+    </p>
+    <pre><code>await api.query('Texas', '4385', 'QLD');   // texas-4385-qld
+await api.getSuburbBySlug('texas-4385-nsw');
+
+await api.query('Texas', '4385');
+// throws err.code === 'AMBIGUOUS_SUBURB', err.slugs === ['texas-4385-nsw', 'texas-4385-qld']</code></pre>
+    <p>
+      <code>getSuburb()</code> tries the plain <code>&lt;name&gt;-&lt;postcode&gt;</code> slug first and only falls back
+      to the search index when that misses, so ordinary lookups cost a single request. The affected pairs are
+      Cottonvale 4375, Jervis Bay 2540, Mingoola 4380, Mungindi 2406 and Texas 4385.
+    </p>
   </section>
 
   <section class="card">

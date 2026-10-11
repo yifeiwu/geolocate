@@ -139,9 +139,13 @@ def emit_all(
         if row is None:
             continue
 
+        # One flat list, ordered by connectivity then proximity. Every file holds
+        # the same fixed neighbourhood (MAX_HOPS), so there is no hop argument to
+        # pass — but each record keeps its own hop count and km, so consumers can
+        # filter the list on either.
         entries = []
-        for hop in sorted(buckets):
-            for other in buckets[hop]:
+        for hop, bucket in sorted(buckets.items()):
+            for other in bucket:
                 km = _km_between(xy[node_id], xy[other])
                 entries.append(
                     {
@@ -152,7 +156,9 @@ def emit_all(
                         "km": round_km(km),
                     }
                 )
-        entries.sort(key=lambda e: (e["hops"], e["km"], e["suburb"]))
+        entries.sort(
+            key=lambda e: (e["hops"], e["km"], e["suburb"], e["postcode"] or "", e["state"])
+        )
 
         payload = {
             "suburb": row["name"],

@@ -4,8 +4,11 @@
  * Works against the precomputed static JSON on GitHub Pages. No dependencies.
  *
  *   const api = createClient();
- *   const r = await api.query('Parramatta', '2150', 2);
+ *   const r = await api.query('Parramatta', '2150');
  *   // r.neighbours -> [{suburb, postcode, state, hops, km}, ...]
+ *
+ * Every file holds the same fixed neighbourhood, so there is no hop argument to
+ * pass - filter the returned list yourself on `hops` or `km`.
  *
  * For hop counts beyond the precomputed maximum, load data/graph.json and call
  * bfs() instead - it runs client-side over the raw adjacency graph.
@@ -30,44 +33,114 @@
 
   function json(url) {
     return fetch(url).then(function (r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status + ' for ' + url);
+      if (!r.ok) throw httpError(r.status, url);
       return r.json();
     });
+  }
+
+  function httpError(status, url) {
+    var e = new Error('HTTP ' + status + ' for ' + url);
+    e.status = status;
+    e.url = url;
+    return e;
+  }
+
+  var shardCache = {};
+
+  function loadShard(letter) {
+    if (!shardCache[letter]) {
+      shardCache[letter] = json(BASE + '/api/index/' + letter + '.json')
+        .catch(function () { return []; });
+    }
+    return shardCache[letter];
   }
 
   function slugify(text) {
     return String(text).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   }
 
-  /** Fetch one suburb's full record by name + postcode. */
-  function getSuburb(suburb, postcode) {
-    if (!suburb || !postcode) {
-      return Promise.reject(new Error('both suburb and postcode are required'));
-    }
-    return json(BASE + '/api/n/' + slugify(suburb) + '-' + postcode + '.json');
+  /** Fetch one locality's full record by its exact slug. */
+  function getSuburbBySlug(slug) {
+    return json(BASE + '/api/n/' + slug + '.json');
+  }
+
+  function notFound(suburb, postcode) {
+    var e = new Error('no locality matching "' + suburb + ' ' + postcode + '"');
+    e.code = 'NOT_FOUND';
+    return e;
+  }
+
+  function ambiguous(name, postcode, hits) {
+    var states = hits.map(function (h) { return h.state; });
+    var e = new Error(
+      '"' + name + ' ' + postcode + '" is in ' + states.join(' and ') +
+      '; pass a state, or call getSuburbBySlug()'
+    );
+    e.code = 'AMBIGUOUS_SUBURB';
+    e.slugs = hits.map(function (h) { return h.slug; });
+    return e;
   }
 
   /**
-   * Neighbours within `distance` hops. Results are sorted by hops then km.
-   * `distance` defaults to the maximum the file was built with.
+   * Look the slug up in the search index. Needed because a handful of
+   * localities share both name and postcode across a state border
+   * (e.g. Texas 4385 is in both QLD and NSW), so their slugs carry a state
+   * suffix that the name+postcode pair alone cannot reproduce.
    */
-  function query(suburb, postcode, distance) {
-    return getSuburb(suburb, postcode).then(function (doc) {
-      var max = distance == null ? doc.max_distance : distance;
-      if (max > doc.max_distance) {
-        throw new Error(
-          'this build supports distance 1-' + doc.max_distance +
-          '; load data/graph.json and use bfs() for deeper queries'
-        );
-      }
+  function resolveSlug(suburb, postcode, state) {
+    var want = slugify(suburb);
+    return loadShard(want.charAt(0)).then(function (entries) {
+      var hits = entries.filter(function (e) {
+        return e.postcode === postcode &&
+               slugify(e.name) === want &&
+               (!state || e.state === state);
+      });
+      if (hits.length === 1) return hits[0].slug;
+      if (hits.length === 0) return null;
+      throw ambiguous(hits[0].name, postcode, hits);
+    });
+  }
+
+  /**
+   * Fetch one suburb's full record by name + postcode, with optional state.
+   * Falls back to the search index when the name+postcode pair does not map
+   * to a bare `<name>-<postcode>` slug.
+   */
+  function getSuburb(suburb, postcode, state) {
+    if (!suburb || !postcode) {
+      return Promise.reject(new Error('both suburb and postcode are required'));
+    }
+    postcode = String(postcode);
+    var state_ = state ? String(state).toLowerCase() : '';
+    var direct = slugify(suburb) + '-' + postcode + (state_ ? '-' + state_ : '');
+    return getSuburbBySlug(direct).catch(function (err) {
+      if (err && err.code === 'AMBIGUOUS_SUBURB') throw err;
+      if (err && err.status && err.status !== 404) throw err;
+      return resolveSlug(suburb, postcode, state).then(function (slug) {
+        if (!slug) throw notFound(suburb, postcode);
+        return getSuburbBySlug(slug);
+      });
+    });
+  }
+
+  /**
+   * A locality's full neighbour list, nearest first.
+   *
+   * Every file holds the same fixed neighbourhood (however many hops the build
+   * was configured with), so there is no hop filter to apply here — filter the
+   * returned list yourself, on `km` or on whatever you care about. `state` is
+   * only needed for the handful of cross-border name+postcode collisions.
+   */
+  function query(suburb, postcode, state) {
+    return getSuburb(suburb, postcode, state).then(function (doc) {
       return {
         suburb: doc.suburb,
         postcode: doc.postcode,
         state: doc.state,
         centroid: doc.centroid,
+        isolated: doc.isolated,
         truncated: doc.truncated,
-        maxDistance: doc.max_distance,
-        neighbours: doc.neighbours.filter(function (n) { return n.hops <= max; })
+        neighbours: doc.neighbours
       };
     });
   }
@@ -117,7 +190,7 @@
           seen[nid] = true;
           next.push(nid);
 
-          var entry = { id: parseInt(nid, 10), hops: d, km: distanceFrom(start, nid) };
+          var entry = { id: parseInt(nid, 10), hops: d, km: distanceFrom(start, nid, metaMap) };
           if (metaMap && metaMap[nid]) {
             entry.suburb = metaMap[nid].name;
             entry.postcode = metaMap[nid].postcode;
@@ -146,10 +219,17 @@
    * Centroid distance in km between two locality ids, matching the build's
    * EPSG:3577 (GDA2020 Australian Albers) measurement exactly. Returns null
    * when the dictionary lacks the projected coordinates.
+   *
+   * Prefers an explicitly supplied dictionary over the module-level one loaded
+   * by loadGraph(), so bfs() measures against the meta it was actually handed.
+   * Reading the cache unconditionally here would silently report the *edge*
+   * distance (distance to the previous hop) whenever a caller passes its own
+   * dictionary without going through loadGraph().
    */
-  function distanceFrom(aId, bId) {
-    var a = metaCache && metaCache[aId];
-    var b = metaCache && metaCache[bId];
+  function distanceFrom(aId, bId, meta) {
+    var m = meta && meta[aId] && meta[bId] ? meta : metaCache;
+    var a = m && m[aId];
+    var b = m && m[bId];
     if (!a || !b || a.cx == null || b.cx == null) return null;
     return round1(Math.sqrt(Math.pow(a.cx - b.cx, 2) + Math.pow(a.cy - b.cy, 2)) / 1000);
   }
@@ -172,6 +252,7 @@
     return {
       query: query,
       getSuburb: getSuburb,
+      getSuburbBySlug: getSuburbBySlug,
       search: search,
       bfs: bfs,
       loadGraph: loadGraph
@@ -179,6 +260,11 @@
   };
 
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { createClient: global.createClient, slugify: slugify, bfs: bfs };
+    module.exports = {
+      createClient: global.createClient,
+      slugify: slugify,
+      resolveSlug: resolveSlug,
+      bfs: bfs
+    };
   }
 })(typeof window !== 'undefined' ? window : globalThis);
