@@ -83,7 +83,7 @@ def validate_output(site_dir: Path, expected: int) -> list[str]:
     if len(files) != expected:
         raise AssertionError(f"expected {expected} suburb files, found {len(files)}")
 
-    for required in ("data/suburbs.json", "data/graph.json", "data/suburbs.sqlite.zip"):
+    for required in ("data/suburbs.json", "data/graph.json"):
         if not (site_dir / required).exists():
             raise AssertionError(f"missing artefact: {required}")
 

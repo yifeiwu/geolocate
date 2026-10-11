@@ -25,7 +25,6 @@ def main(argv=None) -> int:
     ap.add_argument("--min-shared-boundary", type=float, default=config.MIN_SHARED_BOUNDARY_M,
                     help="metres of shared boundary required for distance 1")
     ap.add_argument("--out", default=str(config.SITE_DIR))
-    ap.add_argument("--skip-sqlite", action="store_true")
     ap.add_argument("--cache-only", action="store_true",
                     help="use cached downloads; fail if anything is missing")
     args = ap.parse_args(argv)
@@ -82,7 +81,7 @@ def main(argv=None) -> int:
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     stats = emit.emit_all(meta, cen, neighbours, lengths, hop_map,
-                          releases, out_dir=out_dir, write_sqlite=not args.skip_sqlite)
+                          releases, out_dir=out_dir)
 
     warn += validate.validate_output(out_dir, len(meta))
 

@@ -119,22 +119,14 @@
     <p>Sharded by the first letter of the locality name, so typeahead never downloads the whole dictionary.</p>
 
     <h3>Bulk data</h3>
-    <pre><code>GET /data/suburbs.json   <span class="c"># dictionary: id -&gt; name, state, postcodes, centroid</span>
-GET /data/graph.json     <span class="c"># raw adjacency: id -&gt; [neighbour_id, centroid_km, shared_boundary_km]</span>
-GET /data/suburbs.sqlite.zip</code></pre>
-
-    <h3>SQLite bundle</h3>
+    <pre><code>GET /data/suburbs.json   <span class="c"># dictionary: id -&gt; name, state, postcodes, centroid, cx, cy</span>
+GET /data/graph.json     <span class="c"># raw adjacency: id -&gt; [neighbour_id, centroid_km, shared_boundary_km]</span></code></pre>
     <p>
-      The archive contains a <code>suburbs</code> table and an <code>adjacency</code> table
-      (86,746 rows, both directions). Because it stores the raw graph rather than precomputed hops, you can walk
-      to any depth locally:
+      These two files carry the whole dataset: <code>graph.json</code> is every adjacency edge (43,373 of
+      them, stored in both directions), and <code>suburbs.json</code> maps each id to its name, state,
+      postcodes and centroid. Together they are smaller than the per-suburb files and support any hop
+      distance via <code>bfs()</code>.
     </p>
-    <pre><code>WITH RECURSIVE walk(id, hops) AS (
-  SELECT neighbour_id, 1 FROM adjacency WHERE id = (SELECT id FROM suburbs WHERE slug = 'parramatta-2150')
-  UNION
-  SELECT a.neighbour_id, w.hops + 1 FROM adjacency a JOIN walk w ON a.id = w.id WHERE w.hops &lt; 3
-)
-SELECT s.name, s.postcode, s.state, w.hops FROM walk w JOIN suburbs s ON s.id = w.id;</code></pre>
   </section>
 
   <section class="card">

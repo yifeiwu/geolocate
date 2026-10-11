@@ -52,9 +52,8 @@ centroid distance. Filter on `hops` for your requested `distance`.
 |---|---|
 | `GET /api/n/<name>-<postcode>.json` | Neighbours at each hop, 1–3 |
 | `GET /api/index/<letter>.json` | Search index sharded by first letter |
-| `GET /data/suburbs.json` | Dictionary: `id → name, state, postcodes, centroid` |
+| `GET /data/suburbs.json` | Dictionary: `id → name, state, postcodes, centroid, cx, cy` |
 | `GET /data/graph.json` | Raw adjacency: `id → [neighbour_id, km, shared_boundary_km]` |
-| `GET /data/suburbs.sqlite.zip` | SQLite bundle for local analysis |
 | `GET /_meta.json` | Build timestamp, source releases, counts, attribution |
 
 ### Client library
@@ -73,15 +72,14 @@ centroid distance. Filter on `hops` for your requested `distance`.
 
 ### Arbitrary hop counts
 
-`graph.json` holds the raw adjacency, so you can expand past the precomputed maximum in the browser:
+`graph.json` (43,373 edges) plus `suburbs.json` together are **smaller than the whole set of per-suburb
+files** and carry the entire dataset, so this path is the cheaper way to load everything:
 
 ```js
 const { graph, suburbs } = await api.loadGraph();
 const id = Object.keys(suburbs).find(k => suburbs[k].slug === 'parramatta-2150');
 api.bfs(graph, id, 6, suburbs);   // any depth
 ```
-
-Or query the SQLite bundle with a recursive CTE — see the site for a ready-made query.
 
 ---
 
@@ -145,7 +143,7 @@ python -m pipeline.cache_key                    # CI source-cache fingerprint
 A full build takes ~4.5 minutes and downloads ~400 MB of source data (cached in `data/cache/`).
 
 Useful flags: `--min-shared-boundary 100` (require 100 m of shared border for distance 1),
-`--max-hops N`, `--skip-sqlite`, `--out DIR`.
+`--max-hops N`, `--min-shared-boundary M`, `--out DIR`.
 
 ### Layout
 
@@ -158,7 +156,7 @@ pipeline/
   adjacency.py       shared-boundary graph
   postcodes.py       locality x postal area join
   hops.py            BFS expansion
-  emit.py             JSON + SQLite artefacts
+  emit.py             JSON artefacts (per-suburb, dictionary, graph, index)
   validate.py         symmetry, known adjacencies, output schema
   verify_client.py    parity check: client bfs() vs precomputed files
   verify_site.py      site links/assets vs emitted data

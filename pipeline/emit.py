@@ -5,8 +5,6 @@ import json
 import logging
 import math
 import re
-import sqlite3
-import zipfile
 from collections import defaultdict
 from pathlib import Path
 
@@ -113,7 +111,6 @@ def emit_all(
     hops: dict[int, dict[int, list[int]]],
     sources: dict,
     out_dir: Path | None = None,
-    write_sqlite: bool = True,
 ) -> dict:
     out_dir = Path(out_dir or config.SITE_DIR)
     api_dir = out_dir / "api" / "n"
@@ -233,64 +230,8 @@ def emit_all(
         shard.sort(key=lambda e: (e["name"], e["postcode"] or ""))
         stats["bytes"] += _write_json(out_dir / "api" / "index" / f"{letter}.json", shard)
 
-    # ------------------------------------------------ SQLite bundle
-    if write_sqlite:
-        stats["bytes"] += _write_sqlite(data_dir / "suburbs.sqlite", rows, neighbours, lengths, xy)
-
     log.info(
         "emitted %d suburb files (%d neighbour entries), %.1f MB total JSON",
         stats["files"], stats["neighbour_entries"], stats["bytes"] / 1e6,
     )
     return stats
-
-
-def _write_sqlite(path: Path, records: list[dict], neighbours, lengths, xy) -> int:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists():
-        path.unlink()
-    conn = sqlite3.connect(path)
-    cur = conn.cursor()
-    cur.executescript(
-        """
-        CREATE TABLE suburbs (
-            id INTEGER PRIMARY KEY, loc_pid TEXT, slug TEXT, name TEXT, state TEXT,
-            primary_postcode TEXT, postcodes TEXT, lat REAL, lon REAL,
-            centroid_kind TEXT, area_sqkm REAL
-        );
-        CREATE TABLE adjacency (
-            id INTEGER, neighbour_id INTEGER, km REAL, shared_boundary_km REAL,
-            PRIMARY KEY (id, neighbour_id)
-        );
-        CREATE INDEX idx_adj_id ON adjacency(id);
-        CREATE INDEX idx_sub_name ON suburbs(name);
-        """
-    )
-    cur.executemany(
-        "INSERT INTO suburbs VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-        [
-            (
-                int(r["id"]), r["loc_pid"], r["slug"], r["name"], r["state"],
-                r["primary_postcode"], json.dumps(r["postcodes"]),
-                float(r["lat"]), float(r["lon"]), r["centroid_kind"], float(r["area_sqkm"]),
-            )
-            for r in records
-        ],
-    )
-    edge_rows = [
-        (int(a), int(b), round_km(_km_between(xy[a], xy[b])),
-         round(lengths.get((a, b), 0.0) / 1000.0, 3))
-        for a, nbrs in neighbours.items()
-        for b in nbrs
-    ]
-    cur.executemany("INSERT OR REPLACE INTO adjacency VALUES (?,?,?,?)", edge_rows)
-    conn.commit()
-    conn.close()
-
-    zipped = path.with_suffix(".sqlite.zip")
-    with zipfile.ZipFile(zipped, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
-        zf.write(path, arcname=path.name)
-    raw = path.stat().st_size
-    log.info("sqlite: %d suburbs, %d edges (%.1f MB raw, %.1f MB zipped)",
-             len(records), len(edge_rows), raw / 1e6, zipped.stat().st_size / 1e6)
-    path.unlink()
-    return zipped.stat().st_size
