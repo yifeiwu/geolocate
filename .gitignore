@@ -1,0 +1,20 @@
+# Build cache (source shapefiles, ~400 MB)
+data/cache/
+
+# Generated output - rebuilt by CI, not committed
+site/api/
+site/data/
+site/_meta.json
+
+# Local scratch
+_out/
+_out_nsw/
+*.log
+_t*.py
+_build.log
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.DS_Store

@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Australian Suburb Neighbourhood API</title>
+<meta name="description" content="Connectivity-based neighbouring suburbs for Australia. Given a suburb, postcode and distance, returns every suburb within N hops of shared boundary.">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<header class="wrap">
+  <h1>Australian Suburb Neighbourhood API</h1>
+  <p class="lede">
+    Given a <strong>suburb</strong>, <strong>postcode</strong> and <strong>distance</strong>, returns every
+    Australian suburb within <em>N</em> hops of connectivity &mdash; where distance is measured by how many
+    shared boundaries separate two suburbs, not by kilometres.
+  </p>
+  <p class="stats" id="stats">loading dataset metadata&hellip;</p>
+</header>
+
+<main class="wrap">
+
+  <section class="card" id="try">
+    <h2>Try it</h2>
+    <form id="form" autocomplete="off">
+      <div class="field">
+        <label for="suburb">Suburb</label>
+        <input id="suburb" list="suggestions" placeholder="Parramatta" required>
+        <datalist id="suggestions"></datalist>
+      </div>
+      <div class="field small">
+        <label for="postcode">Postcode</label>
+        <input id="postcode" placeholder="2150" required>
+      </div>
+      <div class="field small">
+        <label for="distance">Distance (hops)</label>
+        <select id="distance">
+          <option value="1">1 &mdash; directly connected</option>
+          <option value="2">2</option>
+          <option value="3" selected>3</option>
+        </select>
+      </div>
+      <button type="submit">Search</button>
+    </form>
+    <p class="error" id="error" hidden></p>
+  </section>
+
+  <section id="result" hidden>
+    <h2 id="result-title"></h2>
+    <p class="muted" id="result-sub"></p>
+    <div id="result-stats" class="pillrow"></div>
+    <table id="result-table">
+      <thead>
+        <tr><th>Suburb</th><th>Postcode</th><th>State</th><th class="num">Distance</th><th class="num">Centroid km</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>How distance works</h2>
+    <p>
+      Suburb boundaries come from <strong>Geoscape Administrative Boundaries</strong>, the official gazetted
+      locality boundaries. Two suburbs are <strong>directly connected</strong> (distance&nbsp;1) when their
+      polygons share a boundary line of at least 1&nbsp;metre.
+    </p>
+    <ul>
+      <li><strong>Distance 1</strong> &mdash; the polygons share a boundary.</li>
+      <li><strong>Distance 2</strong> &mdash; reachable via one intermediate suburb.</li>
+      <li><strong>Distance 3</strong> &mdash; reachable via two intermediate suburbs.</li>
+    </ul>
+    <p class="callout">
+      <strong>Corner contact does not count.</strong> Four suburbs meeting at a single point are all at
+      distance 2, never distance 1. In the current build, 1,047 corner-only contacts were rejected this way.
+    </p>
+    <p class="callout warn">
+      <strong>River-separated suburbs are not adjacent.</strong> Geoscape models waterways as gaps between
+      localities, so for example the Melbourne CBD and Fitzroy are ~144&nbsp;m apart across the Yarra and are
+      <em>not</em> directly connected. Fitzroy is instead adjacent to Carlton, East Melbourne and Collingwood.
+    </p>
+    <p class="callout warn">
+      <strong><code>km</code> and <code>hops</code> are independent.</strong> A suburb 2 hops away can be
+      closer in kilometres than one 1 hop away &mdash; long thin corridor suburbs are the usual case. Never
+      infer one from the other.
+    </p>
+  </section>
+
+  <section class="card">
+    <h2>Endpoints</h2>
+
+    <h3>Neighbours for one suburb</h3>
+    <p>One file per locality, named <code>&lt;slugified-name&gt;-&lt;postcode&gt;</code>. Fully self-contained &mdash; every neighbour carries its own name, postcode, state, hop count and distance.</p>
+    <pre><code>GET /api/n/parramatta-2150.json</code></pre>
+    <pre><code>{
+  "suburb": "Parramatta",
+  "postcode": "2150",
+  "state": "NSW",
+  "locality_id": "loc581d5d75cd4f",
+  "postcodes": ["2150", "2116"],
+  "centroid": { "lat": -33.81397, "lon": 151.00688, "kind": "geometric" },
+  "area_sqkm": 5.48,
+  "max_distance": 3,
+  "isolated": false,
+  "truncated": false,
+  "neighbours": [
+    { "suburb": "Harris Park", "postcode": "2150", "state": "NSW", "hops": 1, "km": 1.0 },
+    { "suburb": "Mays Hill",   "postcode": "2145", "state": "NSW", "hops": 1, "km": 1.8 }
+  ]
+}</code></pre>
+    <p>
+      Where a name and postcode collide across a state border the slug gains a state suffix, for example
+      <code>cottonvale-4375-nsw</code> and <code>cottonvale-4375-qld</code>.
+      A locality with no neighbours returns <code>"isolated": true</code> and an empty list.
+    </p>
+
+    <h3>Search index</h3>
+    <pre><code>GET /api/index/p.json</code></pre>
+    <p>Sharded by the first letter of the locality name, so typeahead never downloads the whole dictionary.</p>
+
+    <h3>Bulk data</h3>
+    <pre><code>GET /data/suburbs.json   <span class="c"># dictionary: id -&gt; name, state, postcodes, centroid</span>
+GET /data/graph.json     <span class="c"># raw adjacency: id -&gt; [neighbour_id, centroid_km, shared_boundary_km]</span>
+GET /data/suburbs.sqlite.zip</code></pre>
+
+    <h3>SQLite bundle</h3>
+    <p>
+      The archive contains a <code>suburbs</code> table and an <code>adjacency</code> table
+      (86,746 rows, both directions). Because it stores the raw graph rather than precomputed hops, you can walk
+      to any depth locally:
+    </p>
+    <pre><code>WITH RECURSIVE walk(id, hops) AS (
+  SELECT neighbour_id, 1 FROM adjacency WHERE id = (SELECT id FROM suburbs WHERE slug = 'parramatta-2150')
+  UNION
+  SELECT a.neighbour_id, w.hops + 1 FROM adjacency a JOIN walk w ON a.id = w.id WHERE w.hops &lt; 3
+)
+SELECT s.name, s.postcode, s.state, w.hops FROM walk w JOIN suburbs s ON s.id = w.id;</code></pre>
+  </section>
+
+  <section class="card">
+    <h2>Client library</h2>
+    <p><code>assets/neighbours.js</code> &mdash; no dependencies, works in the browser or Node.</p>
+    <pre><code>&lt;script src="assets/neighbours.js"&gt;&lt;/script&gt;
+&lt;script&gt;
+  const api = createClient();
+  const r = await api.query('Parramatta', '2150', 2);
+  console.log(r.neighbours);          // filtered to hops &lt;= 2
+  console.log(await api.search('parra', 10));
+&lt;/script&gt;</code></pre>
+    <p>
+      For hop counts beyond the precomputed maximum, load the raw graph and expand client-side &mdash; it is a
+      few hundred KB and a breadth-first search takes milliseconds:
+    </p>
+    <pre><code>const { graph, suburbs } = await api.loadGraph();
+const id = Object.keys(suburbs).find(k =&gt; suburbs[k].slug === 'parramatta-2150');
+api.bfs(graph, id, 6, suburbs);   // any depth</code></pre>
+  </section>
+
+  <section class="card">
+    <h2>Caveats</h2>
+    <ul>
+      <li><strong>Centroids can fall outside a suburb.</strong> A geometric centroid of a concave or multi-part
+          polygon is not necessarily inside it. Where that happens the anchor is replaced by a representative
+          point of the largest part and <code>centroid.kind</code> is <code>"fallback"</code>. This affects
+          <span id="fallbackcount">&hellip;</span> localities, overwhelmingly remote pastoral areas.</li>
+      <li><strong>Postcodes come from ABS Postal Areas</strong>, a mesh-block approximation, not Australia Post.
+          A large rural locality can span several postcodes; <code>postcodes</code> lists all of them and
+          <code>postcode</code> is the dominant one.</li>
+      <li><strong>Postcode boundaries are frozen at the ASGS edition used.</strong> The build uses the newest
+          published edition and probes for a newer one each run.</li>
+      <li><strong>Isolated localities are real.</strong> Islands and remote stations with no sharing locality
+          return an empty neighbour list rather than an error &mdash; <span id="isolatedcount">&hellip;</span>
+          localities in the current build, including Lord Howe Island and French Island.</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2>Attribution</h2>
+    <p id="attribution">loading&hellip;</p>
+    <p class="muted">
+      This project is not affiliated with or endorsed by Geoscape Australia or the Australian Bureau of Statistics.
+    </p>
+  </section>
+
+</main>
+
+<footer class="wrap muted">
+  <p>Built as a static site on GitHub Pages. Data &copy; Geoscape Australia and the Commonwealth of Australia, licensed CC BY 4.0.</p>
+</footer>
+
+<script src="assets/neighbours.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>
